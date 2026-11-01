@@ -1,0 +1,14 @@
+# Live configuration holds your network layout and secrets: never commit it
+config.json
+config.json.tmp
+*.yaml
+!config.example.*
+
+# Runtime / build output
+*.db
+*.db-wal
+*.db-shm
+__pycache__/
+*.pyc
+ledmux/ledmux
+.DS_Store

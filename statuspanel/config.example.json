@@ -1,0 +1,47 @@
+{
+  "settings": {
+    "web_port": 80,
+    "interval": 1.5,
+    "jitter": 0.5,
+    "timeout": 3,
+    "fail_after": 3,
+    "min_on_ms": 200,
+    "blink_hz": 4,
+    "run_led": "RUN",
+    "alarm_led": "ADRS_ERR",
+    "lamp_test_switch": [2, 0, 1],
+    "poll_all_switch": [2, 7, 0],
+    "database": "/var/lib/statuspanel/history.db",
+    "history_days": 14,
+    "history_sample_s": 60,
+    "edit_password": "",
+    "allow_command_checks_from_web": false
+  },
+  "homeassistant": {
+    "enabled": false,
+    "host": "homeassistant.local",
+    "port": 1883,
+    "username": "",
+    "password": "",
+    "discovery_prefix": "homeassistant",
+    "device_name": "Infrastructure Status Panel"
+  },
+  "checks": [
+    {"id": "gateway", "name": "Gateway", "led": "A21", "type": "ping", "host": "192.0.2.1", "location": "network rack"},
+    {"id": "gateway_dns", "name": "Gateway DNS", "led": "A20", "type": "dns", "server": "192.0.2.1", "query": "example.com"},
+    {"id": "internet", "name": "Internet", "led": "A19", "type": "ping", "host": "1.1.1.1"},
+    {"id": "internet_dns", "name": "Internet DNS", "led": "A18", "type": "dns", "server": "1.1.1.1", "query": "example.com"},
+    {"id": "internet_https", "name": "Internet HTTPS", "led": "A17", "type": "http", "url": "https://www.google.com/generate_204", "expect_status": "204", "interval": 6, "timeout": 5},
+    {"id": "home_assistant", "name": "Home Assistant", "led": "A15", "type": "http", "url": "http://homeassistant.local:8123/", "interval": 4, "timeout": 5},
+    {"id": "mqtt_broker", "name": "MQTT broker", "led": "A14", "type": "tcp", "host": "homeassistant.local", "port": 1883},
+    {"id": "nas_web", "name": "NAS web", "led": "A12", "type": "http", "url": "https://nas.example.lan:5001/", "verify_tls": false, "interval": 3},
+    {"id": "direwolf", "name": "Direwolf TNC", "led": "A9", "type": "agw", "host": "tnc.example.lan", "port": 8000, "interval": 10},
+    {"id": "piaware_radio", "name": "ADS-B radio", "led": "A8", "type": "json", "url": "http://piaware.example.lan/status.json", "field": "radio.status", "equals": ["green"], "detail_field": "radio.message", "interval": 3},
+    {"id": "adsb_decoding", "name": "ADS-B decoding", "led": "A7", "type": "json", "url": "http://piaware.example.lan:8080/data/aircraft.json", "field": "messages", "increasing": true, "stale_s": 60, "interval": 2},
+    {"id": "hypervisor", "name": "Hypervisor", "led": "D15", "type": "ping", "host": "192.0.2.10"},
+    {"id": "vm_web", "name": "Web VM", "led": "D14", "type": "ping", "host": "192.0.2.20"},
+    {"id": "nvr", "name": "NVR", "led": "PAUSE", "type": "tcp", "host": "192.0.2.30", "port": 554},
+    {"id": "cam_front", "name": "Cam front door", "led": "MASTER", "type": "tcp", "host": "192.0.2.31", "port": 554, "interval": 2},
+    {"id": "cam_back", "name": "Cam back yard", "led": "USER", "type": "tcp", "host": "192.0.2.32", "port": 554, "interval": 2}
+  ]
+}

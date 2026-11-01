@@ -1,0 +1,651 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Infrastructure Status</title>
+<style>
+:root {
+  --bg: #121014; --surface: #1c181f; --line: #2e2833; --text: #ece6ef; --muted: #9a8fa3;
+  --panel: #6d1a36; --panel-2: #8c2448; --panel-ink: #f7d9e3;
+  --up: #3ecf7a; --down: #ff4d4d; --unknown: #8a8191; --poll: #ffc94d;
+  --led-off: #3a0f1d;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; justify-content: space-between;
+  padding: 16px; border-bottom: 1px solid var(--line); }
+h1 { margin: 0; font-size: 18px; letter-spacing: .02em; }
+h1 small { color: var(--muted); font-weight: 400; margin-left: 8px; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px;
+  background: var(--surface); border: 1px solid var(--line); font-size: 13px; }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--unknown); }
+.dot.up { background: var(--up); } .dot.down { background: var(--down); }
+.banner { font-weight: 600; font-size: 15px; }
+.banner.ok { color: var(--up); } .banner.bad { color: var(--down); }
+main { padding: 16px; max-width: 1400px; margin: 0 auto; }
+section { margin-bottom: 24px; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 10px; }
+
+/* ---- front panel ---- */
+.panel-wrap { overflow-x: auto; border-radius: 10px; }
+.panel { background: linear-gradient(180deg, var(--panel-2), var(--panel)); color: var(--panel-ink);
+  padding: 18px 20px 14px; border-radius: 10px; width: max-content; min-width: 100%;
+  font: 10px/1.2 ui-monospace, "SF Mono", Menlo, monospace; text-transform: uppercase; }
+.prow { display: flex; align-items: flex-start; gap: 22px; }
+.prow + .prow { margin-top: 18px; }
+.grp { display: flex; gap: 4px; padding-top: 4px; border-top: 2px solid rgba(247,217,227,.35); }
+.grp.blank { border-color: transparent; }
+.grp .cap { display: none; }
+.cell { width: 48px; display: flex; flex-direction: column; align-items: center; gap: 4px; cursor: default; }
+.cell.spacer { visibility: hidden; }
+.led { width: 14px; height: 14px; border-radius: 50%; background: var(--led-off);
+  box-shadow: inset 0 1px 2px rgba(0,0,0,.6); transition: background .08s; }
+.led.on { background: #ffb3c4; box-shadow: 0 0 8px 2px rgba(255,140,170,.75); }
+.cell.assigned .led { outline: 2px solid rgba(247,217,227,.5); outline-offset: 2px; }
+.cell.down .led { animation: blink .25s steps(1) infinite; }
+.cell.polling .led { background: #ffe1a8; box-shadow: 0 0 8px 2px rgba(255,201,77,.8); }
+.cell.reserved .led { outline: 2px dashed rgba(247,217,227,.35); outline-offset: 2px; }
+@keyframes blink { 0% { background: #ff6b6b; box-shadow: 0 0 10px 3px rgba(255,77,77,.9); } 50% { background: var(--led-off); box-shadow: none; } }
+.lname { opacity: .65; font-size: 9px; }
+.sys { font: 600 10px/1.15 ui-sans-serif, system-ui, sans-serif; text-transform: none; text-align: center;
+  max-width: 50px; overflow-wrap: break-word; hyphens: auto; min-height: 2.3em; }
+.cell.down .sys { color: #fff; background: rgba(255,77,77,.55); border-radius: 3px; padding: 0 2px; }
+.cell.selected .led { outline-color: #fff; }
+.legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 10px; color: var(--muted); font-size: 12px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+
+/* ---- table ---- */
+.tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
+table { width: 100%; border-collapse: collapse; background: var(--surface); }
+th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { font-size: 12px; color: var(--muted); font-weight: 500; position: sticky; top: 0; background: var(--surface); }
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: #241f28; }
+tbody tr.sel { background: #2b2430; }
+td.detail { white-space: normal; color: var(--muted); max-width: 360px; }
+.status { font-weight: 600; text-transform: uppercase; font-size: 12px; }
+.status.up { color: var(--up); } .status.down { color: var(--down); } .status.unknown { color: var(--unknown); }
+.mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+.spark { display: block; }
+button { background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 6px;
+  padding: 4px 10px; font: inherit; font-size: 12px; cursor: pointer; }
+button:hover { border-color: var(--muted); }
+
+.cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; }
+@media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+.events { max-height: 420px; overflow-y: auto; }
+.ev { display: grid; grid-template-columns: 150px 70px minmax(0,1fr); gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.ev:last-child { border-bottom: 0; }
+.ev .t { color: var(--muted); font-size: 12px; }
+.ev .d { color: var(--muted); font-size: 12px; grid-column: 3; }
+@media (max-width: 600px) { .ev { grid-template-columns: 1fr 60px; } .ev > :nth-child(3), .ev .d { grid-column: 1 / -1; } }
+.stats { display: flex; flex-wrap: wrap; gap: 20px; margin: 6px 0 12px; }
+.stats div b { display: block; font-size: 20px; }
+.stats div span { color: var(--muted); font-size: 12px; }
+.muted { color: var(--muted); }
+#chart svg { width: 100%; height: 160px; display: block; }
+footer { color: var(--muted); font-size: 12px; padding: 0 16px 24px; text-align: center; }
+
+/* ---- editor ---- */
+.btn-primary { background: #8c2448; border-color: #b0355f; color: #fff; }
+.btn-primary:hover { border-color: #ff8fb0; }
+.btn-danger { color: var(--down); }
+button:disabled { opacity: .5; cursor: default; }
+body.editing .panel .cell { cursor: pointer; }
+body.editing .panel .cell:not(.assigned):not(.reserved):not(.spacer):hover .led { outline: 2px dashed #fff; outline-offset: 2px; }
+.edit-only { display: none !important; }
+body.editing .edit-only { display: revert !important; }
+body.editing .editbar.edit-only { display: flex !important; }
+body.editing .view-only { display: none !important; }
+.editbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+.editbar .note { color: var(--muted); font-size: 12px; }
+.warn { color: var(--poll); }
+dialog { background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 12px;
+  padding: 0; width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 32px); }
+dialog::backdrop { background: rgba(0,0,0,.6); }
+dialog form { display: flex; flex-direction: column; max-height: calc(100vh - 34px); }
+dialog h3 { margin: 0; padding: 14px 16px; border-bottom: 1px solid var(--line); font-size: 15px; }
+.dbody { padding: 14px 16px; overflow-y: auto; display: grid; gap: 12px; }
+.dfoot { padding: 12px 16px; border-top: 1px solid var(--line); display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.dfoot .spacer { flex: 1; }
+.field { display: grid; gap: 4px; }
+.field > span { font-size: 12px; color: var(--muted); }
+.field input[type=text], .field input[type=number], .field input[type=password], .field select {
+  background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px;
+  padding: 7px 9px; font: inherit; width: 100%; }
+.field input:focus, .field select:focus { outline: 2px solid #8c2448; outline-offset: 0; }
+.check { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+.row2 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 520px) { .row2 { grid-template-columns: 1fr 1fr; } }
+.fieldset { border-top: 1px solid var(--line); padding-top: 10px; display: grid; gap: 12px; }
+.fieldset > b { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.result { font-size: 13px; padding: 8px 10px; border-radius: 6px; background: var(--bg); }
+.result.ok { color: var(--up); } .result.bad { color: var(--down); }
+.err { color: var(--down); font-size: 13px; }
+td.actions { white-space: nowrap; }
+td.actions button { margin-right: 4px; }
+
+@media print {
+  body { background: #fff; color: #000; }
+  header .pill, #details, #eventsec, footer, button { display: none !important; }
+  .panel { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .tablewrap, table, th { background: #fff; color: #000; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>Infrastructure Status <small id="host"></small></h1>
+  <div class="banner" id="banner">Loading…</div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <span class="pill"><span class="dot" id="paneldot"></span>Front panel</span>
+    <span class="pill"><span class="dot" id="hadot"></span>Home Assistant</span>
+    <button onclick="pollNow()">Poll all now</button>
+    <button class="view-only" onclick="startEdit()">Edit</button>
+    <button class="edit-only btn-primary" onclick="stopEdit()">Done editing</button>
+  </div>
+</header>
+<main>
+  <section>
+    <h2>Panel map</h2>
+    <div class="panel-wrap"><div class="panel" id="panel"></div></div>
+    <div class="legend">
+      <span><i style="background:#ffb3c4"></i>Poll in progress (lit ≥ <span id="minon">200</span> ms)</span>
+      <span><i style="background:var(--down)"></i>Fast blink = system unhealthy</span>
+      <span><i style="border:2px solid var(--muted)"></i>Assigned LED</span>
+      <span><i style="border:2px dashed var(--muted)"></i>Panel indicator (RUN = monitor alive, alarm = anything down)</span>
+      <span>Whole panel flashing slowly = monitor software stopped</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>Systems</h2>
+    <div class="editbar edit-only">
+      <button class="btn-primary" onclick="editCheck(null)">+ Add system</button>
+      <button onclick="editSettings()">Settings</button>
+      <span class="note">Click a free LED on the map to add a system there, or an assigned LED to edit it. Changes apply immediately.</span>
+      <span class="note warn" id="openwarn"></span>
+    </div>
+    <div class="tablewrap"><table>
+      <thead><tr><th class="edit-only"></th><th>LED</th><th>System</th><th>Status</th><th>Since</th><th>Check</th><th>Latency</th><th>Last poll</th><th>Recent</th><th>Detail</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table></div>
+  </section>
+
+  <div class="cols">
+    <section id="details">
+      <h2 id="dtitle">System history</h2>
+      <div class="card">
+        <div id="dbody" class="muted">Select a system to see its last 24 hours.</div>
+        <div id="chart"></div>
+      </div>
+    </section>
+    <section id="eventsec">
+      <h2>Health log</h2>
+      <div class="card events" id="events"><span class="muted">No events yet.</span></div>
+    </section>
+  </div>
+</main>
+<dialog id="dlgCheck"><form method="dialog" onsubmit="return false">
+  <h3 id="ckTitle">System</h3>
+  <div class="dbody">
+    <label class="field"><span>Name</span><input type="text" id="ckName" required></label>
+    <div class="row2">
+      <label class="field"><span>LED</span><select id="ckLed"></select></label>
+      <label class="field" style="grid-column: span 2"><span>Check type</span><select id="ckType" onchange="renderTypeFields()"></select></label>
+    </div>
+    <div id="ckFields" class="fieldset"></div>
+    <div class="fieldset"><b>Timing</b>
+      <div class="row2">
+        <label class="field"><span>Interval (s)</span><input type="number" step="any" min="0.2" id="ckInterval"></label>
+        <label class="field"><span>Timeout (s)</span><input type="number" step="any" min="0.2" id="ckTimeout"></label>
+        <label class="field"><span>Fail after</span><input type="number" min="1" step="1" id="ckFail"></label>
+      </div>
+      <div class="row2">
+        <label class="field" style="grid-column: span 2"><span>Location (shown on map/table)</span><input type="text" id="ckLocation"></label>
+        <label class="field"><span>Group</span><input type="text" id="ckGroup"></label>
+      </div>
+    </div>
+    <div id="ckResult" class="result" hidden></div>
+    <div id="ckErr" class="err"></div>
+  </div>
+  <div class="dfoot">
+    <button type="button" class="btn-danger" id="ckDelete" onclick="deleteCheck()">Delete</button>
+    <span class="spacer"></span>
+    <button type="button" onclick="testCheck()">Test</button>
+    <button type="button" onclick="$('dlgCheck').close()">Cancel</button>
+    <button type="button" class="btn-primary" onclick="saveCheck()">Save</button>
+  </div>
+</form></dialog>
+
+<dialog id="dlgSettings"><form method="dialog" onsubmit="return false">
+  <h3>Settings</h3>
+  <div class="dbody">
+    <div class="fieldset" style="border:0;padding:0"><b>Polling defaults</b>
+      <div class="row2">
+        <label class="field"><span>Interval (s)</span><input type="number" step="any" id="stInterval"></label>
+        <label class="field"><span>Timeout (s)</span><input type="number" step="any" id="stTimeout"></label>
+        <label class="field"><span>Fail after</span><input type="number" step="1" id="stFail"></label>
+      </div>
+      <div class="row2">
+        <label class="field"><span>Jitter (0-0.9)</span><input type="number" step="0.05" id="stJitter"></label>
+        <label class="field"><span>Min LED on (ms)</span><input type="number" step="10" id="stMinOn"></label>
+        <label class="field"><span>Blink rate (Hz)</span><input type="number" step="0.5" id="stBlink"></label>
+      </div>
+      <div class="row2">
+        <label class="field"><span>RUN indicator LED</span><select id="stRun"></select></label>
+        <label class="field"><span>Alarm LED</span><select id="stAlarm"></select></label>
+        <label class="field"><span>Keep history (days)</span><input type="number" step="1" id="stDays"></label>
+      </div>
+    </div>
+    <div class="fieldset"><b>Home Assistant (MQTT)</b>
+      <label class="check"><input type="checkbox" id="haEnabled"> Publish to Home Assistant</label>
+      <div class="row2">
+        <label class="field" style="grid-column: span 2"><span>Broker host</span><input type="text" id="haHost"></label>
+        <label class="field"><span>Port</span><input type="number" id="haPort"></label>
+      </div>
+      <div class="row2">
+        <label class="field"><span>Username</span><input type="text" id="haUser" autocomplete="off"></label>
+        <label class="field" style="grid-column: span 2"><span id="haPassLabel">Password</span><input type="password" id="haPass" autocomplete="new-password"></label>
+      </div>
+      <div class="row2">
+        <label class="field" style="grid-column: span 2"><span>Device name</span><input type="text" id="haDevice"></label>
+        <label class="field"><span>Discovery prefix</span><input type="text" id="haPrefix"></label>
+      </div>
+      <div class="muted" id="haState" style="font-size:12px"></div>
+    </div>
+    <div class="fieldset"><b>Edit password</b>
+      <label class="field"><span id="pwLabel">New edit password (blank = unchanged)</span><input type="password" id="stPw" autocomplete="new-password"></label>
+      <label class="check"><input type="checkbox" id="stPwClear"> Remove password (anyone on the network can edit)</label>
+    </div>
+    <div id="stErr" class="err"></div>
+  </div>
+  <div class="dfoot"><span class="spacer"></span>
+    <button type="button" onclick="$('dlgSettings').close()">Cancel</button>
+    <button type="button" class="btn-primary" onclick="saveSettings()">Save</button>
+  </div>
+</form></dialog>
+
+<dialog id="dlgLogin"><form method="dialog" onsubmit="return false">
+  <h3>Edit password</h3>
+  <div class="dbody">
+    <label class="field"><span>Password</span><input type="password" id="lgPw" autocomplete="current-password"></label>
+    <div id="lgErr" class="err"></div>
+  </div>
+  <div class="dfoot"><span class="spacer"></span>
+    <button type="button" onclick="$('dlgLogin').close()">Cancel</button>
+    <button type="submit" class="btn-primary" onclick="login()">Unlock</button>
+  </div>
+</form></dialog>
+
+<footer>Served by the PiDP-11 status panel · <a href="/api/status" style="color:inherit">JSON API</a></footer>
+
+<script>
+const ADDR = [], DATA = [];
+for (let b = 21; b >= 0; b--) ADDR.push('A' + b);
+for (let b = 15; b >= 0; b--) DATA.push('D' + b);
+const LAYOUT = [
+  [ {leds: ADDR.slice(0, 1)}, {leds: ADDR.slice(1, 4)}, {leds: ADDR.slice(4, 7)}, {leds: ADDR.slice(7, 10)},
+    {leds: ADDR.slice(10, 13)}, {leds: ADDR.slice(13, 16)}, {leds: ADDR.slice(16, 19)}, {leds: ADDR.slice(19, 22)},
+    {leds: ['PAR_ERR', 'ADRS_ERR', 'RUN', 'PAUSE', 'MASTER']},
+    {leds: ['USER', 'SUPER', 'KERNEL', 'DATA']}, {leds: ['ADDR16', 'ADDR18', 'ADDR22']} ],
+  [ {leds: [null], blank: true}, {leds: [null, null, null], blank: true},
+    {leds: DATA.slice(0, 1)}, {leds: DATA.slice(1, 4)}, {leds: DATA.slice(4, 7)}, {leds: DATA.slice(7, 10)},
+    {leds: DATA.slice(10, 13)}, {leds: DATA.slice(13, 16)},
+    {leds: ['PAR_HIGH', 'PAR_LOW']},
+    {leds: ['USER_D', 'SUPER_D', 'KERNEL_D', 'CONS_PHY']}, {leds: ['PROG_PHY', 'KERNEL_I', 'SUPER_I', 'USER_I']},
+    {leds: ['DATA_PATHS', 'BUS_REG', 'UADRS', 'DISP_REG']} ],
+];
+const SHORT = { PAR_ERR: 'par err', ADRS_ERR: 'adrs err', ADDR16: '16', ADDR18: '18', ADDR22: '22',
+  PAR_HIGH: 'par hi', PAR_LOW: 'par lo', USER_D: 'user d', SUPER_D: 'super d', KERNEL_D: 'kern d',
+  CONS_PHY: 'cons phy', PROG_PHY: 'prog phy', KERNEL_I: 'kern i', SUPER_I: 'super i', USER_I: 'user i',
+  DATA_PATHS: 'dat path', BUS_REG: 'bus reg', UADRS: 'µadrs', DISP_REG: 'disp reg' };
+
+let state = null, selected = null, lastEventsAt = 0;
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function buildPanel() {
+  const p = $('panel');
+  p.innerHTML = LAYOUT.map(row => '<div class="prow">' + row.map(g =>
+    `<div class="grp${g.blank ? ' blank' : ''}">` + g.leds.map(n => n
+      ? `<div class="cell" id="led-${n}" data-led="${n}"><div class="led"></div><div class="lname">${SHORT[n] || n}</div><div class="sys"></div></div>`
+      : '<div class="cell spacer"><div class="led"></div><div class="lname">-</div><div class="sys"></div></div>'
+    ).join('') + '</div>').join('') + '</div>').join('');
+  p.addEventListener('click', e => {
+    const cell = e.target.closest('.cell[data-led]');
+    if (!cell || !state) return;
+    const c = state.checks.find(c => c.led === cell.dataset.led);
+    if (editing) {
+      if (c) editCheck(c.id);
+      else if (!cell.classList.contains('reserved')) editCheck(null, cell.dataset.led);
+      return;
+    }
+    if (c) select(c.id);
+  });
+}
+
+function ago(ts) {
+  if (!ts) return '—';
+  const s = Math.max(0, state.now - ts);
+  if (s < 60) return Math.round(s) + 's ago';
+  if (s < 3600) return Math.round(s / 60) + 'm ago';
+  if (s < 86400) return (s / 3600).toFixed(1) + 'h ago';
+  return (s / 86400).toFixed(1) + 'd ago';
+}
+const fmtTime = ts => new Date(ts * 1000).toLocaleString([], {month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit'});
+const ms = v => v == null ? '—' : (v < 10 ? v.toFixed(1) : Math.round(v)) + ' ms';
+
+function spark(hist) {
+  const h = hist.slice(-40), w = 120, bw = w / 40;
+  return `<svg class="spark" width="${w}" height="16" viewBox="0 0 ${w} 16">` + h.map((p, i) =>
+    `<rect x="${(40 - h.length + i) * bw}" y="${p[1] ? 4 : 0}" width="${bw - 1}" height="${p[1] ? 12 : 16}" fill="${p[1] ? 'var(--up)' : 'var(--down)'}" opacity="${p[1] ? .55 : 1}"/>`).join('') + '</svg>';
+}
+
+function render() {
+  const s = state;
+  $('host').textContent = s.host + '.local';
+  $('minon').textContent = Math.round(s.settings.min_on_ms);
+  const sm = s.summary;
+  const b = $('banner');
+  if (sm.down) { b.className = 'banner bad'; b.textContent = `${sm.down} of ${sm.total} systems DOWN: ${sm.down_systems.join(', ')}`; }
+  else { b.className = 'banner ok'; b.textContent = `All ${sm.up} of ${sm.total} systems healthy`; }
+  document.title = (sm.down ? `(${sm.down} down) ` : '') + 'Infrastructure Status';
+  $('paneldot').className = 'dot ' + (s.panel.connected ? 'up' : 'down');
+  $('hadot').className = 'dot ' + (!s.homeassistant.enabled ? '' : s.homeassistant.connected ? 'up' : 'down');
+
+  document.querySelectorAll('.cell[data-led]').forEach(c => { c.className = 'cell'; c.querySelector('.sys').textContent = ''; c.querySelector('.led').classList.remove('on'); c.title = ''; });
+  for (const [key, label] of [['run_led', 'monitor running'], ['alarm_led', 'any system down']]) {
+    const el = s[key] && $('led-' + s[key].toUpperCase());
+    if (!el) continue;
+    el.classList.add('reserved');
+    el.querySelector('.sys').textContent = key === 'run_led' ? 'RUN' : 'ALARM';
+    el.title = label;
+    if (key === 'run_led' || sm.down) el.querySelector('.led').classList.add('on');
+  }
+  for (const c of s.checks) {
+    const el = $('led-' + c.led);
+    if (!el) continue;
+    el.classList.add('assigned', c.status);
+    if (c.polling) el.classList.add('polling');
+    if (c.id === selected) el.classList.add('selected');
+    el.querySelector('.sys').textContent = c.name;
+    el.title = `${c.name} — ${c.status.toUpperCase()}\n${c.type}: ${c.target}\n${c.detail}`;
+  }
+
+  $('rows').innerHTML = s.checks.map(c => `<tr data-id="${c.id}" class="${c.id === selected ? 'sel' : ''}">
+    <td class="edit-only actions"><button onclick="editCheck('${c.id}')">Edit</button></td>
+    <td class="mono">${c.led}</td><td><b>${esc(c.name)}</b>${c.location ? `<div class="muted" style="font-size:12px">${esc(c.location)}</div>` : ''}</td>
+    <td><span class="status ${c.status}">${c.polling ? 'polling…' : c.status}</span></td>
+    <td>${c.status === 'unknown' ? '—' : ago(c.since)}</td>
+    <td class="mono">${c.type} ${esc(c.target)}</td><td class="mono">${ms(c.latency_ms)}</td>
+    <td>${ago(c.last_poll)}</td><td>${spark(c.history)}</td><td class="detail">${esc(c.detail)}</td></tr>`).join('');
+}
+
+async function refresh() {
+  try {
+    state = await (await fetch('/api/status')).json();
+    render();
+    if (Date.now() - lastEventsAt > 5000) loadEvents();
+  } catch (e) { $('banner').className = 'banner bad'; $('banner').textContent = 'Lost contact with the status panel'; }
+}
+
+async function loadEvents() {
+  lastEventsAt = Date.now();
+  const ev = await (await fetch('/api/events?limit=300')).json();
+  $('events').innerHTML = ev.length ? ev.map(e => `<div class="ev"><span class="t">${fmtTime(e.ts)}</span>
+    <span class="status ${e.status}">${e.status}</span><span><b>${esc(e.name)}</b></span>
+    <span class="d">${esc(e.detail)}</span></div>`).join('') : '<span class="muted">No events yet.</span>';
+}
+
+async function select(id) {
+  selected = id;
+  render();
+  const c = state.checks.find(c => c.id === id);
+  $('dtitle').textContent = c.name + ' — last 24 hours';
+  const h = await (await fetch('/api/history?hours=24&id=' + encodeURIComponent(id))).json();
+  const okN = h.filter(p => p.ok).length, lat = h.filter(p => p.ok && p.latency != null).map(p => p.latency);
+  const avg = lat.length ? lat.reduce((a, b) => a + b, 0) / lat.length : null;
+  const sorted = [...lat].sort((a, b) => a - b), p95 = sorted.length ? sorted[Math.floor(sorted.length * .95)] : null;
+  $('dbody').innerHTML = `<div class="stats">
+    <div><b>${h.length ? (100 * okN / h.length).toFixed(2) + '%' : '—'}</b><span>availability</span></div>
+    <div><b>${ms(avg)}</b><span>avg latency</span></div><div><b>${ms(p95)}</b><span>p95 latency</span></div>
+    <div><b>${h.length - okN}</b><span>failed polls / ${h.length}</span></div></div>
+    <div class="muted mono">${esc(c.type)} ${esc(c.target)} · every ${c.interval}s · LED ${c.led}
+    <button style="margin-left:8px" onclick="pollNow('${c.id}')">Poll now</button></div>`;
+  drawChart(h);
+}
+
+function drawChart(h) {
+  if (!h.length) { $('chart').innerHTML = ''; return; }
+  const W = 600, H = 160, pad = 28, t1 = Date.now() / 1000, t0 = t1 - 86400;
+  const lat = h.filter(p => p.latency != null).map(p => p.latency);
+  const max = Math.max(1, ...lat) * 1.1;
+  const x = t => pad + (t - t0) / (t1 - t0) * (W - pad - 4), y = v => H - 18 - v / max * (H - 30);
+  let path = '', fails = '';
+  for (const p of h) {
+    if (p.ok && p.latency != null) path += (path ? 'L' : 'M') + x(p.ts).toFixed(1) + ',' + y(p.latency).toFixed(1);
+    else fails += `<rect x="${x(p.ts) - 1}" y="8" width="2.5" height="${H - 26}" fill="var(--down)" opacity=".7"/>`;
+  }
+  const ticks = [0, 6, 12, 18, 24].map(hh => {
+    const t = t0 + hh * 3600;
+    return `<text x="${x(t)}" y="${H - 4}" fill="var(--muted)" font-size="10" text-anchor="middle">${new Date(t * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}</text>`;
+  }).join('');
+  $('chart').innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+    <line x1="${pad}" x2="${W}" y1="${H - 18}" y2="${H - 18}" stroke="var(--line)"/>
+    <text x="2" y="14" fill="var(--muted)" font-size="10">${Math.round(max)}ms</text>
+    ${fails}<path d="${path}" fill="none" stroke="var(--up)" stroke-width="1.5" vector-effect="non-scaling-stroke"/>${ticks}</svg>`;
+}
+
+async function pollNow(id) {
+  await fetch('/api/poll' + (id ? '?id=' + encodeURIComponent(id) : ''), {method: 'POST'});
+  setTimeout(refresh, 400);
+}
+
+document.addEventListener('click', e => {
+  if (editing) return;
+  const tr = e.target.closest('tbody tr[data-id]');
+  if (tr && !e.target.closest('button')) select(tr.dataset.id);
+});
+// ===================== editing =====================
+let editing = false, cfg = null, editId = null;
+const PW_KEY = 'statuspanel-edit-pw';
+const getPw = () => { try { return sessionStorage.getItem(PW_KEY) || ''; } catch (e) { return ''; } };
+const setPw = v => { try { sessionStorage.setItem(PW_KEY, v); } catch (e) {} };
+
+async function api(path, body) {
+  const r = await fetch(path, {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Edit-Password': getPw()},
+    body: JSON.stringify(body || {})});
+  const data = await r.json().catch(() => ({}));
+  if (r.status === 401) { stopEdit(); throw new Error('Edit password required'); }
+  if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+  return data;
+}
+async function loadConfig() { cfg = await (await fetch('/api/config')).json(); return cfg; }
+
+async function startEdit() {
+  await loadConfig();
+  if (cfg.editing.password_required) {
+    const r = await fetch('/api/auth', {method: 'POST', headers: {'X-Edit-Password': getPw()}});
+    if (!r.ok) { $('lgErr').textContent = ''; $('lgPw').value = ''; $('dlgLogin').showModal(); return; }
+  }
+  enterEdit();
+}
+async function login() {
+  setPw($('lgPw').value);
+  const r = await fetch('/api/auth', {method: 'POST', headers: {'X-Edit-Password': getPw()}});
+  if (!r.ok) { $('lgErr').textContent = 'Wrong password'; return; }
+  $('dlgLogin').close();
+  enterEdit();
+}
+function enterEdit() {
+  editing = true;
+  document.body.classList.add('editing');
+  $('openwarn').textContent = cfg.editing.password_required ? '' : 'No edit password is set: anyone on the network can change this. Set one in Settings.';
+}
+function stopEdit() { editing = false; document.body.classList.remove('editing'); }
+
+function usedLeds(exceptId) {
+  const used = {};
+  for (const c of cfg.checks) if (c.id !== exceptId) used[c.led] = c.name;
+  if (cfg.settings.run_led) used[cfg.settings.run_led] = 'RUN indicator';
+  if (cfg.settings.alarm_led) used[cfg.settings.alarm_led] = 'alarm indicator';
+  return used;
+}
+function ledOptions(sel, current, used, allowNone) {
+  sel.innerHTML = (allowNone ? '<option value="">(none)</option>' : '') + cfg.leds.map(n =>
+    `<option value="${n}" ${used[n] ? 'disabled' : ''}>${n}${used[n] ? ' (' + esc(used[n]) + ')' : ''}</option>`).join('');
+  sel.value = current || '';
+}
+
+async function editCheck(id, presetLed) {
+  await loadConfig();
+  editId = id;
+  const c = id ? cfg.checks.find(c => c.id === id) : {type: 'ping', led: presetLed};
+  if (!c) return;
+  const used = usedLeds(id);
+  let led = c.led;
+  if (!led) led = cfg.leds.find(n => !used[n]);
+  ledOptions($('ckLed'), led, used);
+  $('ckType').innerHTML = Object.entries(cfg.types).map(([k, t]) =>
+    `<option value="${k}" ${k === 'command' && !cfg.editing.command_allowed && c.type !== 'command' ? 'disabled' : ''}>${esc(t.label)}</option>`).join('');
+  $('ckType').value = c.type;
+  $('ckTitle').textContent = id ? 'Edit ' + c.name : 'Add system';
+  $('ckName').value = c.name || '';
+  $('ckInterval').value = c.interval ?? ''; $('ckInterval').placeholder = cfg.settings.interval;
+  $('ckTimeout').value = c.timeout ?? ''; $('ckTimeout').placeholder = cfg.settings.timeout;
+  $('ckFail').value = c.fail_after ?? ''; $('ckFail').placeholder = cfg.settings.fail_after;
+  $('ckLocation').value = c.location || ''; $('ckGroup').value = c.group || '';
+  $('ckDelete').hidden = !id;
+  $('ckErr').textContent = ''; $('ckResult').hidden = true;
+  renderTypeFields(c);
+  $('dlgCheck').showModal();
+  $('ckName').focus();
+}
+function renderTypeFields(c) {
+  const type = $('ckType').value, cur = c || collectCheck(true);
+  $('ckFields').innerHTML = '<b>' + esc(cfg.types[type].label) + '</b>' + cfg.types[type].fields.map(f => {
+    let v = cur[f.key];
+    if (f.kind === 'bool') {
+      const on = v === undefined ? !!f.default : !!v;
+      return `<label class="check"><input type="checkbox" data-key="${f.key}" data-kind="bool" ${on ? 'checked' : ''}> ${esc(f.label)}</label>`;
+    }
+    if (Array.isArray(v)) v = v.join(', ');
+    const t = (f.kind === 'int' || f.kind === 'float') ? 'number' : 'text';
+    return `<label class="field"><span>${esc(f.label)}${f.required ? ' *' : ''}</span><input type="${t}" ${t === 'number' ? 'step="any"' : ''}
+      data-key="${f.key}" data-kind="${f.kind}" value="${esc(v ?? '')}" placeholder="${esc(f.placeholder || '')}"></label>`;
+  }).join('');
+}
+function collectCheck(partial) {
+  const old = editId ? cfg.checks.find(c => c.id === editId) : null;
+  const c = {name: $('ckName').value.trim(), led: $('ckLed').value, type: $('ckType').value};
+  if (old) c.id = old.id;
+  const num = (id, key) => { const v = $(id).value; if (v !== '') c[key] = Number(v); };
+  num('ckInterval', 'interval'); num('ckTimeout', 'timeout'); num('ckFail', 'fail_after');
+  if ($('ckLocation').value.trim()) c.location = $('ckLocation').value.trim();
+  if ($('ckGroup').value.trim()) c.group = $('ckGroup').value.trim();
+  document.querySelectorAll('#ckFields [data-key]').forEach(el => {
+    const k = el.dataset.key, kind = el.dataset.kind;
+    if (kind === 'bool') c[k] = el.checked;
+    else if (el.value.trim() !== '') c[k] = (kind === 'int' || kind === 'float') ? Number(el.value) : el.value.trim();
+  });
+  return c;
+}
+async function saveChecks(list, errEl, dlg) {
+  try {
+    cfg = await api('/api/config', {checks: list});
+    dlg.close();
+    refresh();
+  } catch (e) { errEl.textContent = e.message; }
+}
+function saveCheck() {
+  const c = collectCheck();
+  const list = cfg.checks.filter(x => x.id !== editId);
+  const idx = editId ? cfg.checks.findIndex(x => x.id === editId) : list.length;
+  list.splice(idx, 0, c);
+  saveChecks(list, $('ckErr'), $('dlgCheck'));
+}
+function deleteCheck() {
+  const c = cfg.checks.find(x => x.id === editId);
+  if (!c || !confirmDelete(c)) return;
+  saveChecks(cfg.checks.filter(x => x.id !== editId), $('ckErr'), $('dlgCheck'));
+}
+function confirmDelete(c) {
+  const b = $('ckDelete');
+  if (b.dataset.armed === editId) { delete b.dataset.armed; b.textContent = 'Delete'; return true; }
+  b.dataset.armed = editId; b.textContent = 'Click again to delete';
+  setTimeout(() => { delete b.dataset.armed; b.textContent = 'Delete'; }, 4000);
+  return false;
+}
+async function testCheck() {
+  const r = $('ckResult');
+  r.hidden = false; r.className = 'result'; r.textContent = 'Testing…';
+  $('ckErr').textContent = '';
+  try {
+    const t = await api('/api/test', collectCheck());
+    r.className = 'result ' + (t.ok ? 'ok' : 'bad');
+    r.textContent = (t.ok ? 'Healthy' : 'Unhealthy') + (t.latency_ms != null ? ` · ${ms(t.latency_ms)}` : '') + ' · ' + t.detail;
+  } catch (e) { r.hidden = true; $('ckErr').textContent = e.message; }
+}
+
+async function editSettings() {
+  await loadConfig();
+  const s = cfg.settings, h = cfg.homeassistant;
+  $('stInterval').value = s.interval; $('stTimeout').value = s.timeout; $('stFail').value = s.fail_after;
+  $('stJitter').value = s.jitter; $('stMinOn').value = s.min_on_ms; $('stBlink').value = s.blink_hz;
+  $('stDays').value = s.history_days;
+  const used = {}; for (const c of cfg.checks) used[c.led] = c.name;
+  ledOptions($('stRun'), s.run_led, used, true);
+  ledOptions($('stAlarm'), s.alarm_led, used, true);
+  $('haEnabled').checked = !!h.enabled; $('haHost').value = h.host || ''; $('haPort').value = h.port || 1883;
+  $('haUser').value = h.username || ''; $('haPass').value = '';
+  $('haPassLabel').textContent = h.password_set ? 'Password (set; blank = unchanged)' : 'Password';
+  $('haDevice').value = h.device_name || ''; $('haPrefix').value = h.discovery_prefix || 'homeassistant';
+  const hs = state && state.homeassistant;
+  $('haState').textContent = !hs || !hs.enabled ? 'Not publishing.' : hs.connected ? 'Connected.' : ('Not connected. ' + (hs.error || ''));
+  $('stPw').value = ''; $('stPwClear').checked = false;
+  $('pwLabel').textContent = cfg.editing.password_required ? 'New edit password (blank = unchanged)' : 'Set an edit password';
+  $('stErr').textContent = '';
+  $('dlgSettings').showModal();
+}
+async function saveSettings() {
+  const n = id => Number($(id).value);
+  const body = {
+    settings: {interval: n('stInterval'), timeout: n('stTimeout'), fail_after: n('stFail'), jitter: n('stJitter'),
+      min_on_ms: n('stMinOn'), blink_hz: n('stBlink'), history_days: n('stDays'),
+      run_led: $('stRun').value, alarm_led: $('stAlarm').value},
+    homeassistant: {enabled: $('haEnabled').checked, host: $('haHost').value.trim(), port: n('haPort'),
+      username: $('haUser').value.trim(), password: $('haPass').value,
+      device_name: $('haDevice').value.trim(), discovery_prefix: $('haPrefix').value.trim()},
+  };
+  const newPw = $('stPw').value;
+  if ($('stPwClear').checked) body.settings.edit_password = '';
+  else if (newPw) body.settings.edit_password = newPw;
+  try {
+    cfg = await api('/api/config', body);
+    if ('edit_password' in body.settings) setPw(body.settings.edit_password);
+    $('dlgSettings').close();
+    enterEdit();
+    refresh();
+  } catch (e) { $('stErr').textContent = e.message; }
+}
+
+function fitPanel() {
+  const p = $('panel'), w = p.parentElement;
+  p.style.zoom = 1;
+  const z = Math.min(1, w.clientWidth / p.scrollWidth);
+  p.style.zoom = z < 0.55 ? 0.55 : z;  // below this, scroll instead of shrinking further
+}
+window.addEventListener('resize', fitPanel);
+buildPanel();
+fitPanel();
+refresh();
+setInterval(refresh, 1000);
+setInterval(() => { if (selected) select(selected); }, 60000);
+</script>
+</body>
+</html>

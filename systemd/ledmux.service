@@ -1,0 +1,15 @@
+[Unit]
+Description=PiDP-11 front panel LED multiplexer (statuspanel)
+After=local-fs.target
+
+[Service]
+ExecStart=/opt/statuspanel/ledmux 400
+User=@USER@
+Group=gpio
+CPUSchedulingPolicy=fifo
+CPUSchedulingPriority=50
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
