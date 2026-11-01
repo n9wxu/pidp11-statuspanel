@@ -44,7 +44,7 @@ high/low and the 12 rotary-knob indicators.
 ## Install
 
 ```sh
-git clone https://github.com/<you>/pidp11-statuspanel.git
+git clone https://github.com/n9wxu/pidp11-statuspanel.git
 cd pidp11-statuspanel
 sudo ./install.sh
 ```
